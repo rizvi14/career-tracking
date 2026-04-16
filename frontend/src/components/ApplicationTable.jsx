@@ -4,6 +4,19 @@ import { Pencil, Trash2, ExternalLink, Search, FileText, AlertTriangle } from 'l
 import StatusBadge from './StatusBadge';
 import { findDuplicateIds } from '../duplicates';
 
+const TERMINAL_TAGS = ['Rejected', 'Withdrew', 'Position Filled'];
+
+function daysSinceLastUpdate(app) {
+  const tags = Array.isArray(app.tags) ? app.tags : [app.status ?? 'Application'];
+  if (TERMINAL_TAGS.some((t) => tags.includes(t))) return null;
+  const tagDates = app.tag_dates && typeof app.tag_dates === 'object' ? app.tag_dates : {};
+  const dates = Object.values(tagDates).filter(Boolean);
+  if (app.applied_date) dates.push(app.applied_date);
+  if (dates.length === 0) return null;
+  const latest = dates.slice().sort().at(-1);
+  return Math.floor((new Date() - new Date(latest + 'T00:00:00')) / 86400000);
+}
+
 function formatDate(dateStr) {
   if (!dateStr) return '—';
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
@@ -93,7 +106,7 @@ export default function ApplicationTable({ applications, onEdit, onDelete }) {
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50/80">
-                {['Date Applied', 'Company', 'Role', 'Location', 'Salary', 'Status', ''].map((h) => (
+                {['Date Applied', 'Company', 'Role', 'Location', 'Salary', 'Status', 'Days Idle', ''].map((h) => (
                   <th
                     key={h}
                     className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider"
@@ -169,6 +182,22 @@ export default function ApplicationTable({ applications, onEdit, onDelete }) {
                         </span>
                       ))}
                     </div>
+                  </td>
+                  <td className="px-4 py-3.5">
+                    {(() => {
+                      const days = daysSinceLastUpdate(app);
+                      if (days === null) return null;
+                      const cls =
+                        days <= 7  ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                        days <= 14 ? 'bg-yellow-50 text-yellow-700 border-yellow-100' :
+                        days <= 30 ? 'bg-orange-50 text-orange-700 border-orange-100' :
+                                     'bg-red-50 text-red-700 border-red-100';
+                      return (
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${cls}`}>
+                          {days}d
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center gap-1 justify-end">

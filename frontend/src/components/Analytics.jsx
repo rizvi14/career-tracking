@@ -10,10 +10,29 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
+  LabelList,
   Tooltip,
-  Legend,
   ResponsiveContainer,
 } from 'recharts';
+
+const RADIAN = Math.PI / 180;
+function PieLabel({ cx, cy, midAngle, outerRadius, name, value, percent }) {
+  if (percent < 0.04) return null;
+  const radius = outerRadius + 32;
+  const x = cx + radius * Math.cos(-midAngle * RADIAN);
+  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  return (
+    <text
+      x={x} y={y}
+      fill="#374151"
+      textAnchor={x > cx ? 'start' : 'end'}
+      dominantBaseline="central"
+      fontSize={11}
+    >
+      {name} ({value} · {(percent * 100).toFixed(1)}%)
+    </text>
+  );
+}
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { STATUSES } from '../constants';
 import { findDuplicateGroups } from '../duplicates';
@@ -47,6 +66,8 @@ export default function Analytics({ applications }) {
       value: applications.filter((a) => getTags(a).includes(s.value)).length,
       color: s.color,
     })).filter((s) => s.value > 0);
+    const statusTotal = statusCounts.reduce((sum, s) => sum + s.value, 0);
+    statusCounts.forEach((s) => { s.pct = statusTotal > 0 ? ((s.value / statusTotal) * 100).toFixed(1) : '0.0'; });
 
     // Cumulative by date
     const byDate = {};
@@ -87,7 +108,53 @@ export default function Analytics({ applications }) {
 
     const duplicateGroups = findDuplicateGroups(applications);
 
-    return { total, active, inInterview, offers, statusCounts, cumulativeData, weeklyData, duplicateGroups };
+    // Avg days: Application → Phone Screen (first response was a phone screen)
+    const INTERVIEW_STAGES = ['Phone Screen', 'Hiring Manager', 'Presentation', 'Panel', 'Final'];
+    const phoneScreenApps = applications.filter(
+      (a) => a.applied_date && a.tag_dates?.['Phone Screen']
+    );
+    const avgToPhoneScreen =
+      phoneScreenApps.length > 0
+        ? Math.round(
+            phoneScreenApps.reduce((sum, a) => {
+              const days =
+                (new Date(a.tag_dates['Phone Screen'] + 'T00:00:00') -
+                  new Date(a.applied_date + 'T00:00:00')) /
+                86400000;
+              return sum + days;
+            }, 0) / phoneScreenApps.length
+          )
+        : null;
+
+    // Avg days: Application → Rejection (ghosted — no interview stages reached)
+    const ghostRejectedApps = applications.filter((a) => {
+      const tags = getTags(a);
+      return (
+        tags.includes('Rejected') &&
+        !INTERVIEW_STAGES.some((s) => tags.includes(s)) &&
+        a.applied_date &&
+        a.tag_dates?.['Rejected']
+      );
+    });
+    const avgToRejection =
+      ghostRejectedApps.length > 0
+        ? Math.round(
+            ghostRejectedApps.reduce((sum, a) => {
+              const days =
+                (new Date(a.tag_dates['Rejected'] + 'T00:00:00') -
+                  new Date(a.applied_date + 'T00:00:00')) /
+                86400000;
+              return sum + days;
+            }, 0) / ghostRejectedApps.length
+          )
+        : null;
+
+    return {
+      total, active, inInterview, offers,
+      statusCounts, cumulativeData, weeklyData, duplicateGroups,
+      avgToPhoneScreen, phoneScreenCount: phoneScreenApps.length,
+      avgToRejection, ghostRejectionCount: ghostRejectedApps.length,
+    };
   }, [applications]);
 
   if (applications.length === 0) {
@@ -103,40 +170,65 @@ export default function Analytics({ applications }) {
       <h2 className="text-2xl font-bold text-gray-900 mb-6">Analytics</h2>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="Total Applications" value={stats.total} color="text-gray-900" />
         <StatCard label="Active" value={stats.active} color="text-blue-600" />
         <StatCard label="In Interviews" value={stats.inInterview} color="text-purple-600" />
         <StatCard label="Offers" value={stats.offers} color="text-emerald-600" />
       </div>
 
+      {/* Response time KPIs */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">
+            Avg. Days to Phone Screen
+          </p>
+          {stats.avgToPhoneScreen !== null ? (
+            <>
+              <p className="text-3xl font-bold text-purple-600">{stats.avgToPhoneScreen}d</p>
+              <p className="text-xs text-gray-400 mt-1">across {stats.phoneScreenCount} application{stats.phoneScreenCount !== 1 ? 's' : ''} that reached phone screen</p>
+            </>
+          ) : (
+            <p className="text-2xl font-bold text-gray-300">—</p>
+          )}
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">
+            Avg. Days to Rejection (No Interview)
+          </p>
+          {stats.avgToRejection !== null ? (
+            <>
+              <p className="text-3xl font-bold text-gray-500">{stats.avgToRejection}d</p>
+              <p className="text-xs text-gray-400 mt-1">across {stats.ghostRejectionCount} application{stats.ghostRejectionCount !== 1 ? 's' : ''} rejected before any interview</p>
+            </>
+          ) : (
+            <p className="text-2xl font-bold text-gray-300">—</p>
+          )}
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Status donut */}
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h3 className="text-sm font-semibold text-gray-700 mb-4">Status Breakdown</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <PieChart>
+          <ResponsiveContainer width="100%" height={340}>
+            <PieChart margin={{ top: 20, right: 40, bottom: 20, left: 40 }}>
+              <Tooltip formatter={(val, name, props) => [`${val} (${props.payload.pct}%)`, name]} />
               <Pie
                 data={stats.statusCounts}
                 cx="50%"
-                cy="45%"
+                cy="50%"
                 innerRadius={72}
                 outerRadius={110}
                 paddingAngle={2}
                 dataKey="value"
+                labelLine={{ stroke: '#D1D5DB', strokeWidth: 1 }}
+                label={PieLabel}
               >
                 {stats.statusCounts.map((entry, i) => (
                   <Cell key={i} fill={entry.color} />
                 ))}
               </Pie>
-              <Tooltip formatter={(val, name) => [val, name]} />
-              <Legend
-                iconType="circle"
-                iconSize={8}
-                formatter={(value) => (
-                  <span className="text-xs text-gray-600">{value}</span>
-                )}
-              />
             </PieChart>
           </ResponsiveContainer>
         </div>
@@ -148,12 +240,14 @@ export default function Analytics({ applications }) {
             <p className="text-sm text-gray-400 pt-8 text-center">No dated applications yet.</p>
           ) : (
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={stats.weeklyData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+              <BarChart data={stats.weeklyData} margin={{ top: 20, right: 4, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                 <XAxis dataKey="week" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
                 <Tooltip />
-                <Bar dataKey="count" fill="#3B82F6" radius={[4, 4, 0, 0]} name="Applications" />
+                <Bar dataKey="count" fill="#3B82F6" radius={[4, 4, 0, 0]} name="Applications">
+                  <LabelList dataKey="count" position="top" style={{ fontSize: 11, fill: '#6B7280' }} />
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -169,7 +263,7 @@ export default function Analytics({ applications }) {
           <ResponsiveContainer width="100%" height={280}>
             <AreaChart
               data={stats.cumulativeData}
-              margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
+              margin={{ top: 20, right: 16, left: -20, bottom: 0 }}
             >
               <defs>
                 <linearGradient id="blueGrad" x1="0" y1="0" x2="0" y2="1">
@@ -188,9 +282,11 @@ export default function Analytics({ applications }) {
                 strokeWidth={2}
                 fill="url(#blueGrad)"
                 name="Total"
-                dot={false}
-                activeDot={{ r: 4 }}
-              />
+                dot={{ r: 3, fill: '#3B82F6', strokeWidth: 0 }}
+                activeDot={{ r: 5 }}
+              >
+                <LabelList dataKey="total" position="top" style={{ fontSize: 10, fill: '#3B82F6' }} />
+              </Area>
             </AreaChart>
           </ResponsiveContainer>
         </div>
