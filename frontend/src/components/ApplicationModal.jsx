@@ -117,7 +117,13 @@ export default function ApplicationModal({ isOpen, onClose, onSave, onDelete, in
         const data = await api.parseUrl(form.url.trim());
         applyParsedData(data);
       } catch (e) {
-        setParseError(e.message || 'Failed to parse URL. You can fill in the fields manually.');
+        if (e.message === 'PAGE_BLOCKED') {
+          // Page is login-walled or bot-blocked — auto-switch to paste mode
+          setPasteMode(true);
+          setParseError("This page couldn't be fetched automatically (login wall or bot protection). Paste the job text below and hit Parse Job.");
+        } else {
+          setParseError(e.message || 'Failed to parse URL. You can fill in the fields manually.');
+        }
       } finally {
         setParsing(false);
       }

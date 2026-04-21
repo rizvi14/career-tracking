@@ -190,16 +190,33 @@ async def parse_url(request: ParseURLRequest):
             response = await client.get(request.url, headers=headers)
             html = response.text
 
-        soup = BeautifulSoup(html, "html.parser")
-        for tag in soup(["script", "style", "nav", "footer", "header", "noscript"]):
-            tag.decompose()
-        text = soup.get_text(separator="\n", strip=True)[:8000]
-
+        # First pass: JSON-LD aware extraction (catches Greenhouse, Workday, Lever, etc.)
+        text = extract_text_from_input(html)
         result = extract_job_info(text)
+
+        # Second pass: if first pass missed both company and title, try raw visible text
+        # (sometimes JSON-LD is absent but visible text has enough signal)
+        if not result.get("company") and not result.get("title"):
+            soup = BeautifulSoup(html, "html.parser")
+            for tag in soup(["script", "style", "nav", "footer", "header", "noscript"]):
+                tag.decompose()
+            fallback_text = soup.get_text(separator="\n", strip=True)[:8000]
+            if fallback_text.strip() != text.strip():
+                result = extract_job_info(fallback_text)
+
+        # If we still have nothing useful, signal the frontend to show the paste fallback
+        if not result.get("company") and not result.get("title"):
+            raise HTTPException(
+                status_code=422,
+                detail="PAGE_BLOCKED",
+            )
+
         return result
 
+    except HTTPException:
+        raise
     except json.JSONDecodeError:
-        raise HTTPException(status_code=422, detail="Could not parse job info from page. Try filling in the fields manually.")
+        raise HTTPException(status_code=422, detail="PAGE_BLOCKED")
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
