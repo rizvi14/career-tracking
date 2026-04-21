@@ -142,6 +142,7 @@ class ApplicationUpdate(BaseModel):
     cover_letter: Optional[str] = None
     notes: Optional[str] = None
     tags: Optional[List[str]] = None
+    tag_dates: Optional[dict] = None
     applied_date: Optional[str] = None
 
 
@@ -174,6 +175,23 @@ def extract_job_info(text: str) -> dict:
     return json.loads(raw.strip())
 
 
+async def fetch_with_playwright(url: str) -> str:
+    from playwright.async_api import async_playwright
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            page = await browser.new_page()
+            await page.goto(url, wait_until="networkidle", timeout=30000)
+            html = await page.content()
+        finally:
+            await browser.close()
+    return html
+
+
+def has_useful_content(result: dict) -> bool:
+    return bool(result.get("company") or result.get("title"))
+
+
 @app.post("/api/parse-url")
 async def parse_url(request: ParseURLRequest):
     try:
@@ -186,37 +204,34 @@ async def parse_url(request: ParseURLRequest):
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
         }
-        async with httpx.AsyncClient(follow_redirects=True, timeout=20) as client:
-            response = await client.get(request.url, headers=headers)
-            html = response.text
 
-        # First pass: JSON-LD aware extraction (catches Greenhouse, Workday, Lever, etc.)
-        text = extract_text_from_input(html)
-        result = extract_job_info(text)
+        # Pass 1 — fast httpx fetch + JSON-LD aware extraction
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=20) as client:
+                response = await client.get(request.url, headers=headers)
+                html = response.text
+            text = extract_text_from_input(html)
+            result = extract_job_info(text)
+            if has_useful_content(result):
+                return result
+        except Exception:
+            pass
 
-        # Second pass: if first pass missed both company and title, try raw visible text
-        # (sometimes JSON-LD is absent but visible text has enough signal)
-        if not result.get("company") and not result.get("title"):
-            soup = BeautifulSoup(html, "html.parser")
-            for tag in soup(["script", "style", "nav", "footer", "header", "noscript"]):
-                tag.decompose()
-            fallback_text = soup.get_text(separator="\n", strip=True)[:8000]
-            if fallback_text.strip() != text.strip():
-                result = extract_job_info(fallback_text)
+        # Pass 2 — headless Chromium renders the full page (handles JS-heavy ATS sites)
+        try:
+            html = await fetch_with_playwright(request.url)
+            text = extract_text_from_input(html)
+            result = extract_job_info(text)
+            if has_useful_content(result):
+                return result
+        except Exception:
+            pass
 
-        # If we still have nothing useful, signal the frontend to show the paste fallback
-        if not result.get("company") and not result.get("title"):
-            raise HTTPException(
-                status_code=422,
-                detail="PAGE_BLOCKED",
-            )
-
-        return result
+        # Nothing worked — page likely requires a login
+        raise HTTPException(status_code=422, detail="PAGE_BLOCKED")
 
     except HTTPException:
         raise
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=422, detail="PAGE_BLOCKED")
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -313,22 +328,36 @@ def update_application(app_id: int, data: ApplicationUpdate):
         raise HTTPException(status_code=404, detail="Not found")
 
     updates = {k: v for k, v in data.dict(exclude_unset=True).items()}
+    # Pull out incoming tag_dates before building SET clause
+    incoming_td = updates.pop('tag_dates', None)
     # Serialize tags to JSON, sync status, and record dates for new tags
     if 'tags' in updates:
         tags = updates['tags']
         updates['tags'] = json.dumps(tags)
         updates['status'] = tags[0] if tags else 'Application'
-        # Merge new tag dates without overwriting existing ones
         existing_td = {}
         try:
             existing_td = json.loads(row['tag_dates']) if row['tag_dates'] else {}
         except Exception:
             pass
         today_str = date.today().isoformat()
-        for tag in tags:
-            if tag not in existing_td:
-                existing_td[tag] = today_str
-        updates['tag_dates'] = json.dumps(existing_td)
+        if incoming_td is not None:
+            # Use frontend-provided dates; fall back to existing then today for any gaps
+            merged = {}
+            for tag in tags:
+                if tag in incoming_td and incoming_td[tag]:
+                    merged[tag] = incoming_td[tag]
+                elif tag in existing_td:
+                    merged[tag] = existing_td[tag]
+                else:
+                    merged[tag] = today_str
+            updates['tag_dates'] = json.dumps(merged)
+        else:
+            # Auto-assign today only for newly added tags
+            for tag in tags:
+                if tag not in existing_td:
+                    existing_td[tag] = today_str
+            updates['tag_dates'] = json.dumps(existing_td)
     updates["updated_at"] = datetime.now().isoformat()
 
     set_clause = ", ".join(f"{k} = ?" for k in updates)

@@ -4,6 +4,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "Starting Career Tracker..."
 
+# Install Playwright browser binaries if not already present
+"$SCRIPT_DIR/backend/venv/bin/python" -m playwright install chromium --quiet 2>/dev/null || true
+
 # Start backend in a new Terminal window
 osascript -e "
 tell application \"Terminal\"

@@ -18,6 +18,7 @@ const EMPTY = {
   notes: '',
   tags: ['Application'],
   applied_date: today(),
+  tag_dates: { Application: today() },
 };
 
 function Field({ label, required, children }) {
@@ -59,9 +60,10 @@ export default function ApplicationModal({ isOpen, onClose, onSave, onDelete, in
         notes: initialData.notes ?? '',
         tags: initialData.tags ?? [initialData.status ?? 'Application'],
         applied_date: initialData.applied_date ?? today(),
+        tag_dates: initialData.tag_dates ?? {},
       });
     } else {
-      setForm({ ...EMPTY, applied_date: today() });
+      setForm({ ...EMPTY, applied_date: today(), tag_dates: { Application: today() } });
     }
     setParseError('');
     setPasteMode(false);
@@ -74,9 +76,19 @@ export default function ApplicationModal({ isOpen, onClose, onSave, onDelete, in
     setForm((prev) => {
       const has = prev.tags.includes(tag);
       const next = has ? prev.tags.filter((t) => t !== tag) : [...prev.tags, tag];
-      return { ...prev, tags: next.length === 0 ? prev.tags : next };
+      if (next.length === 0) return prev;
+      const newTagDates = { ...prev.tag_dates };
+      if (!has) {
+        if (!newTagDates[tag]) newTagDates[tag] = today();
+      } else {
+        delete newTagDates[tag];
+      }
+      return { ...prev, tags: next, tag_dates: newTagDates };
     });
   };
+
+  const setTagDate = (tag, val) =>
+    setForm((prev) => ({ ...prev, tag_dates: { ...prev.tag_dates, [tag]: val } }));
 
   const applyParsedData = (data) => {
     const anyFilled = data.company || data.title || data.description || data.location;
@@ -262,12 +274,9 @@ export default function ApplicationModal({ isOpen, onClose, onSave, onDelete, in
 
           {/* Tags + Date */}
           {(() => {
-            const tagDates = initialData?.tag_dates ?? {};
-            const history = Object.entries(tagDates)
-              .sort(([, a], [, b]) => a.localeCompare(b))
-              .map(([tag, d]) => ({ tag, date: d }));
-            const fmtShort = (iso) =>
-              new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            const activeStageTags = STATUSES
+              .map((s) => s.value)
+              .filter((v) => v !== 'Application' && form.tags.includes(v));
             return (
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-3">
@@ -275,7 +284,6 @@ export default function ApplicationModal({ isOpen, onClose, onSave, onDelete, in
                     <div className="flex flex-wrap gap-1.5 pt-0.5">
                       {STATUSES.map((s) => {
                         const active = form.tags.includes(s.value);
-                        const addedDate = tagDates[s.value];
                         return (
                           <button
                             key={s.value}
@@ -289,28 +297,32 @@ export default function ApplicationModal({ isOpen, onClose, onSave, onDelete, in
                             }
                           >
                             {s.value}
-                            {active && addedDate && (
-                              <span className="opacity-60">{fmtShort(addedDate)}</span>
-                            )}
                           </button>
                         );
                       })}
                     </div>
                   </Field>
-                  {history.length > 0 && (
+                  {activeStageTags.length > 0 && (
                     <div>
-                      <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">History</p>
-                      <div className="space-y-1">
-                        {history.map(({ tag, date: d }) => {
+                      <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">Stage Dates</p>
+                      <div className="space-y-1.5">
+                        {activeStageTags.map((tag) => {
                           const s = STATUSES.find((x) => x.value === tag);
                           return (
-                            <div key={tag} className="flex items-center gap-2 text-xs text-gray-500">
+                            <div key={tag} className="flex items-center gap-2">
                               <span
                                 className="w-1.5 h-1.5 rounded-full flex-shrink-0"
                                 style={{ backgroundColor: s?.color ?? '#6B7280' }}
                               />
-                              <span className="font-medium" style={{ color: s?.color ?? '#6B7280' }}>{tag}</span>
-                              <span className="text-gray-400">{fmtShort(d)}</span>
+                              <span className="text-xs font-medium w-28 flex-shrink-0" style={{ color: s?.color ?? '#6B7280' }}>
+                                {tag}
+                              </span>
+                              <input
+                                type="date"
+                                value={form.tag_dates[tag] ?? ''}
+                                onChange={(e) => setTagDate(tag, e.target.value)}
+                                className="text-xs border border-gray-200 rounded-md px-2 py-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              />
                             </div>
                           );
                         })}
