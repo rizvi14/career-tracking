@@ -120,7 +120,7 @@ export default function ApplicationTable({ applications, onEdit, onDelete }) {
               {filtered.map((app) => {
                 const tags = getTags(app);
                 const tagDates = getTagDates(app);
-                const isRejected = tags.includes('Rejected') || tags.includes('Withdrew');
+                const isRejected = TERMINAL_TAGS.some((t) => tags.includes(t));
                 return (
                 <tr
                   key={app.id}

@@ -2,6 +2,7 @@ export const STATUSES = [
   { value: 'Application',    color: '#3B82F6' }, // blue
   { value: 'Phone Screen',   color: '#8B5CF6' }, // purple
   { value: 'Hiring Manager', color: '#6366F1' }, // indigo
+  { value: 'Technical',      color: '#06B6D4' }, // cyan
   { value: 'Presentation',   color: '#F59E0B' }, // amber
   { value: 'Panel',          color: '#F97316' }, // orange
   { value: 'Final',          color: '#EC4899' }, // pink

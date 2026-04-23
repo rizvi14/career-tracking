@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   AreaChart,
   Area,
@@ -37,11 +37,37 @@ import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { STATUSES } from '../constants';
 import { findDuplicateGroups } from '../duplicates';
 
-function StatCard({ label, value, color }) {
+function StatCard({ label, value, color, items }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5">
+    <div
+      className="bg-white rounded-xl border border-gray-200 p-5 relative"
+      onMouseEnter={() => items && setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
       <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">{label}</p>
       <p className={`text-3xl font-bold ${color}`}>{value}</p>
+      {open && items && items.length > 0 && (
+        <div className="absolute left-0 top-full mt-2 z-50 bg-white border border-gray-200 rounded-xl shadow-lg p-3 min-w-[260px]">
+          <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">Active interviews</p>
+          <div className="space-y-2">
+            {items.map((app) => (
+              <div key={app.id} className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <span className="text-sm font-medium text-gray-800 block truncate">{app.company}</span>
+                  <span className="text-xs text-gray-400 block truncate">{app.title}</span>
+                </div>
+                <span
+                  className="text-xs font-medium px-2 py-0.5 rounded-full border whitespace-nowrap flex-shrink-0"
+                  style={{ backgroundColor: app.latestStageColor + '1a', color: app.latestStageColor, borderColor: app.latestStageColor + '40' }}
+                >
+                  {app.latestStage}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -53,11 +79,21 @@ export default function Analytics({ applications }) {
     const active = applications.filter(
       (a) => !['Rejected', 'Withdrew', 'Offer'].some((s) => getTags(a).includes(s))
     ).length;
-    const inInterview = applications.filter((a) =>
-      ['Phone Screen', 'Hiring Manager', 'Presentation', 'Panel', 'Final'].some((s) =>
-        getTags(a).includes(s)
-      )
-    ).length;
+    const TERMINAL = ['Rejected', 'Withdrew', 'Position Filled'];
+    const INTERVIEW_STAGE_ORDER = ['Final', 'Panel', 'Presentation', 'Technical', 'Hiring Manager', 'Phone Screen'];
+    const inInterviewApps = applications.filter((a) => {
+      const tags = getTags(a);
+      return (
+        !TERMINAL.some((t) => tags.includes(t)) &&
+        INTERVIEW_STAGE_ORDER.some((s) => tags.includes(s))
+      );
+    }).map((a) => {
+      const tags = getTags(a);
+      const latestStage = INTERVIEW_STAGE_ORDER.find((s) => tags.includes(s));
+      const stageInfo = STATUSES.find((s) => s.value === latestStage);
+      return { ...a, latestStage, latestStageColor: stageInfo?.color ?? '#6B7280' };
+    });
+    const inInterview = inInterviewApps.length;
     const offers = applications.filter((a) => getTags(a).includes('Offer')).length;
 
     // Pie chart data — count each tag across all applications
@@ -150,7 +186,7 @@ export default function Analytics({ applications }) {
         : null;
 
     return {
-      total, active, inInterview, offers,
+      total, active, inInterview, inInterviewApps, offers,
       statusCounts, cumulativeData, weeklyData, duplicateGroups,
       avgToPhoneScreen, phoneScreenCount: phoneScreenApps.length,
       avgToRejection, ghostRejectionCount: ghostRejectedApps.length,
@@ -173,7 +209,7 @@ export default function Analytics({ applications }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="Total Applications" value={stats.total} color="text-gray-900" />
         <StatCard label="Active" value={stats.active} color="text-blue-600" />
-        <StatCard label="In Interviews" value={stats.inInterview} color="text-purple-600" />
+        <StatCard label="In Interviews" value={stats.inInterview} color="text-purple-600" items={stats.inInterviewApps} />
         <StatCard label="Offers" value={stats.offers} color="text-emerald-600" />
       </div>
 
