@@ -103,7 +103,8 @@ export default function ApplicationTable({ applications, onEdit, onDelete }) {
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <table className="w-full">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[900px]">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50/80">
                 {['Date Applied', 'Company', 'Role', 'Location', 'Salary', 'Status', 'Days Idle', ''].map((h) => (
@@ -168,7 +169,7 @@ export default function ApplicationTable({ applications, onEdit, onDelete }) {
                     {app.title}
                   </td>
                   <td className={`px-4 py-3.5 text-sm ${isRejected ? 'text-gray-400' : 'text-gray-500'}`}>{app.location || '—'}</td>
-                  <td className={`px-4 py-3.5 text-sm whitespace-nowrap ${isRejected ? 'text-gray-400' : 'text-gray-500'}`}>
+                  <td className={`px-4 py-3.5 text-sm max-w-[140px] truncate ${isRejected ? 'text-gray-400' : 'text-gray-500'}`} title={app.salary || undefined}>
                     {app.salary || '—'}
                   </td>
                   <td className="px-4 py-3.5">
@@ -222,6 +223,7 @@ export default function ApplicationTable({ applications, onEdit, onDelete }) {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>
