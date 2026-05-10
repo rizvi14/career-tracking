@@ -4,6 +4,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "Starting Career Tracker..."
 
+# Kill anything already on ports 8000 and 5173
+lsof -ti :8000 | xargs kill -9 2>/dev/null || true
+lsof -ti :5173 | xargs kill -9 2>/dev/null || true
+
 # Start Ollama if not already running
 if ! pgrep -x "ollama" > /dev/null; then
     echo "Starting Ollama..."
@@ -16,6 +20,9 @@ if ! ollama list | grep -q "llama3.2"; then
     echo "Pulling llama3.2 (first-time setup, this may take a few minutes)..."
     ollama pull llama3.2
 fi
+
+# Install/sync backend dependencies
+"$SCRIPT_DIR/backend/venv/bin/pip" install -r "$SCRIPT_DIR/backend/requirements.txt" --quiet
 
 # Install Playwright browser binaries if not already present
 "$SCRIPT_DIR/backend/venv/bin/python" -m playwright install chromium --quiet 2>/dev/null || true
