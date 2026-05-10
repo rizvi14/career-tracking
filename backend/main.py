@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
-import anthropic
+from openai import OpenAI
 import httpx
 from bs4 import BeautifulSoup
 import sqlite3
@@ -147,10 +147,9 @@ class ApplicationUpdate(BaseModel):
 
 
 def extract_job_info(text: str) -> dict:
-    anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    message = anthropic_client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1500,
+    client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
+    response = client.chat.completions.create(
+        model="llama3.2",
         messages=[{
             "role": "user",
             "content": (
@@ -167,7 +166,7 @@ def extract_job_info(text: str) -> dict:
             ),
         }],
     )
-    raw = message.content[0].text.strip()
+    raw = response.choices[0].message.content.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
