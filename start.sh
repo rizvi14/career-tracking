@@ -4,6 +4,19 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "Starting Career Tracker..."
 
+# Start Ollama if not already running
+if ! pgrep -x "ollama" > /dev/null; then
+    echo "Starting Ollama..."
+    ollama serve &>/dev/null &
+    sleep 3
+fi
+
+# Pull llama3.2 if not already downloaded
+if ! ollama list | grep -q "llama3.2"; then
+    echo "Pulling llama3.2 (first-time setup, this may take a few minutes)..."
+    ollama pull llama3.2
+fi
+
 # Install Playwright browser binaries if not already present
 "$SCRIPT_DIR/backend/venv/bin/python" -m playwright install chromium --quiet 2>/dev/null || true
 
