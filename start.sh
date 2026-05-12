@@ -4,21 +4,34 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "Starting Career Tracker..."
 
+# Close all existing Terminal windows
+osascript -e 'tell application "Terminal" to close every window' 2>/dev/null || true
+
 # Kill anything already on ports 8000 and 5173
 lsof -ti :8000 | xargs kill -9 2>/dev/null || true
 lsof -ti :5173 | xargs kill -9 2>/dev/null || true
 
+# Locate ollama binary
+OLLAMA=$(command -v ollama 2>/dev/null \
+    || ls /usr/local/bin/ollama /opt/homebrew/bin/ollama \
+          "/Applications/Ollama.app/Contents/MacOS/Ollama" 2>/dev/null | head -1)
+
+if [ -z "$OLLAMA" ]; then
+    echo "ERROR: Ollama not found. Install it from https://ollama.com and rerun."
+    exit 1
+fi
+
 # Start Ollama if not already running
-if ! pgrep -x "ollama" > /dev/null; then
+if ! pgrep -f "ollama" > /dev/null; then
     echo "Starting Ollama..."
-    ollama serve &>/dev/null &
+    "$OLLAMA" serve &>/dev/null &
     sleep 3
 fi
 
 # Pull llama3.2 if not already downloaded
-if ! ollama list | grep -q "llama3.2"; then
+if ! "$OLLAMA" list | grep -q "llama3.2"; then
     echo "Pulling llama3.2 (first-time setup, this may take a few minutes)..."
-    ollama pull llama3.2
+    "$OLLAMA" pull llama3.2
 fi
 
 # Install/sync backend dependencies
