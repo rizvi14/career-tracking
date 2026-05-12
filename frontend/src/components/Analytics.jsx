@@ -185,8 +185,13 @@ export default function Analytics({ applications }) {
           )
         : null;
 
+    const phoneScreenRatio = total > 0
+      ? ((phoneScreenApps.length / total) * 100).toFixed(1)
+      : null;
+
     return {
       total, active, inInterview, inInterviewApps, offers,
+      phoneScreenRatio, phoneScreenCount: phoneScreenApps.length,
       statusCounts, cumulativeData, weeklyData, duplicateGroups,
       avgToPhoneScreen, phoneScreenCount: phoneScreenApps.length,
       avgToRejection, ghostRejectionCount: ghostRejectedApps.length,
@@ -206,11 +211,16 @@ export default function Analytics({ applications }) {
       <h2 className="text-2xl font-bold text-gray-900 mb-6">Analytics</h2>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-4">
         <StatCard label="Total Applications" value={stats.total} color="text-gray-900" />
         <StatCard label="Active" value={stats.active} color="text-blue-600" />
         <StatCard label="In Interviews" value={stats.inInterview} color="text-purple-600" items={stats.inInterviewApps} />
         <StatCard label="Offers" value={stats.offers} color="text-emerald-600" />
+        <StatCard
+          label="Phone Screen Rate"
+          value={stats.phoneScreenRatio !== null ? `${stats.phoneScreenRatio}%` : '—'}
+          color="text-violet-600"
+        />
       </div>
 
       {/* Response time KPIs */}
