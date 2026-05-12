@@ -8,10 +8,7 @@ from bs4 import BeautifulSoup
 import sqlite3
 from datetime import datetime, date
 import os
-from dotenv import load_dotenv
 import json
-
-load_dotenv()
 
 app = FastAPI()
 
