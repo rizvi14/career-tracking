@@ -28,11 +28,9 @@ if ! pgrep -f "ollama" > /dev/null; then
     sleep 3
 fi
 
-# Pull llama3.2 if not already downloaded
-if ! "$OLLAMA" list | grep -q "llama3.2"; then
-    echo "Pulling llama3.2 (first-time setup, this may take a few minutes)..."
-    "$OLLAMA" pull llama3.2
-fi
+# Pull llama3.2 / check for updates (no-op if already current)
+echo "Checking for llama3.2 updates..."
+"$OLLAMA" pull llama3.2
 
 # Install/sync backend dependencies
 "$SCRIPT_DIR/backend/venv/bin/pip" install -r "$SCRIPT_DIR/backend/requirements.txt" --quiet
