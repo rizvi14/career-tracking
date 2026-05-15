@@ -1,10 +1,14 @@
 import { useState } from 'react';
 import { STATUSES, STATUS_MAP } from '../constants';
-import { Pencil, Trash2, ExternalLink, Search, FileText, AlertTriangle } from 'lucide-react';
+import { Pencil, Trash2, ExternalLink, Search, FileText, AlertTriangle, CalendarDays, X } from 'lucide-react';
 import StatusBadge from './StatusBadge';
 import { findDuplicateIds } from '../duplicates';
 
 const TERMINAL_TAGS = ['Rejected', 'Withdrew', 'Position Filled'];
+
+const BULK_FIELDS = [
+  { label: 'Date Applied', value: 'applied_date' },
+];
 
 function daysSinceLastUpdate(app) {
   const tags = Array.isArray(app.tags) ? app.tags : [app.status ?? 'Application'];
@@ -26,9 +30,13 @@ function formatDate(dateStr) {
   });
 }
 
-export default function ApplicationTable({ applications, onEdit, onDelete }) {
+export default function ApplicationTable({ applications, onEdit, onDelete, onBulkUpdate }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [selected, setSelected] = useState(new Set());
+  const [bulkField, setBulkField] = useState('applied_date');
+  const [bulkDate, setBulkDate] = useState('');
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   const getTags = (app) => (Array.isArray(app.tags) ? app.tags : [app.status ?? 'Application']);
   const getTagDates = (app) => (app.tag_dates && typeof app.tag_dates === 'object' ? app.tag_dates : {});
@@ -39,15 +47,62 @@ export default function ApplicationTable({ applications, onEdit, onDelete }) {
     return new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
-  const filtered = applications.filter((app) => {
-    const q = search.toLowerCase();
-    const matchesSearch =
-      !search ||
-      app.company.toLowerCase().includes(q) ||
-      app.title.toLowerCase().includes(q);
-    const matchesStatus = statusFilter === 'All' || getTags(app).includes(statusFilter);
-    return matchesSearch && matchesStatus;
-  });
+  const filtered = applications
+    .filter((app) => {
+      const q = search.toLowerCase();
+      const matchesSearch =
+        !search ||
+        app.company.toLowerCase().includes(q) ||
+        app.title.toLowerCase().includes(q);
+      const matchesStatus = statusFilter === 'All' || getTags(app).includes(statusFilter);
+      return matchesSearch && matchesStatus;
+    })
+    .sort((a, b) => {
+      const dateA = a.applied_date ?? '';
+      const dateB = b.applied_date ?? '';
+      if (dateB !== dateA) return dateB.localeCompare(dateA);
+      const tsA = a.created_at ?? '';
+      const tsB = b.created_at ?? '';
+      return tsB.localeCompare(tsA);
+    });
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every((a) => selected.has(a.id));
+
+  function toggleAll() {
+    if (allFilteredSelected) {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        filtered.forEach((a) => next.delete(a.id));
+        return next;
+      });
+    } else {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        filtered.forEach((a) => next.add(a.id));
+        return next;
+      });
+    }
+  }
+
+  function toggleOne(id) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  async function applyBulk() {
+    if (!bulkDate || selected.size === 0) return;
+    setBulkSaving(true);
+    try {
+      await onBulkUpdate([...selected], bulkField, bulkDate);
+      setSelected(new Set());
+      setBulkDate('');
+    } finally {
+      setBulkSaving(false);
+    }
+  }
 
   return (
     <div>
@@ -94,6 +149,45 @@ export default function ApplicationTable({ applications, onEdit, onDelete }) {
         </div>
       </div>
 
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-3 mb-3 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-xl">
+          <CalendarDays className="w-4 h-4 text-blue-500 flex-shrink-0" />
+          <span className="text-sm font-medium text-blue-700">{selected.size} selected</span>
+          <div className="flex items-center gap-2 ml-auto">
+            <select
+              value={bulkField}
+              onChange={(e) => setBulkField(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              {BULK_FIELDS.map((f) => (
+                <option key={f.value} value={f.value}>{f.label}</option>
+              ))}
+            </select>
+            <input
+              type="date"
+              value={bulkDate}
+              onChange={(e) => setBulkDate(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            />
+            <button
+              onClick={applyBulk}
+              disabled={!bulkDate || bulkSaving}
+              className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors"
+            >
+              {bulkSaving ? 'Saving…' : 'Apply'}
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg transition-colors"
+              title="Clear selection"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Table */}
       {filtered.length === 0 ? (
         <div className="text-center py-20 text-gray-400 bg-white rounded-xl border border-gray-200">
@@ -107,6 +201,14 @@ export default function ApplicationTable({ applications, onEdit, onDelete }) {
           <table className="w-full min-w-[900px]">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50/80">
+                <th className="pl-4 py-3 w-8">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredSelected}
+                    onChange={toggleAll}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                </th>
                 {['Date Applied', 'Company', 'Role', 'Location', 'Salary', 'Status', 'Days Idle', ''].map((h) => (
                   <th
                     key={h}
@@ -122,16 +224,27 @@ export default function ApplicationTable({ applications, onEdit, onDelete }) {
                 const tags = getTags(app);
                 const tagDates = getTagDates(app);
                 const isRejected = TERMINAL_TAGS.some((t) => tags.includes(t));
+                const isSelected = selected.has(app.id);
                 return (
                 <tr
                   key={app.id}
                   onClick={() => onEdit(app)}
                   className={`transition-colors cursor-pointer ${
-                    isRejected
+                    isSelected
+                      ? 'bg-blue-50/60'
+                      : isRejected
                       ? 'bg-gray-50/80 hover:bg-gray-100/80'
                       : 'hover:bg-gray-50/60'
                   }`}
                 >
+                  <td className="pl-4 py-3.5 w-8" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleOne(app.id)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                  </td>
                   <td className={`px-4 py-3.5 text-sm whitespace-nowrap ${isRejected ? 'text-gray-400' : 'text-gray-500'}`}>
                     {formatDate(app.applied_date)}
                   </td>

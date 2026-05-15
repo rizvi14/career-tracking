@@ -43,6 +43,21 @@ export default function App() {
     setApplications((prev) => prev.filter((a) => a.id !== id));
   };
 
+  const handleBulkUpdate = async (ids, field, value) => {
+    const updated = await Promise.all(
+      ids.map((id) => {
+        const app = applications.find((a) => a.id === id);
+        return api.updateApplication(id, { ...app, [field]: value });
+      })
+    );
+    setApplications((prev) =>
+      prev.map((a) => {
+        const u = updated.find((u) => u.id === a.id);
+        return u ?? a;
+      })
+    );
+  };
+
   const handleSave = async (formData) => {
     if (editingApp) {
       const updated = await api.updateApplication(editingApp.id, formData);
@@ -114,6 +129,7 @@ export default function App() {
                 applications={applications}
                 onEdit={handleEdit}
                 onDelete={handleDelete}
+                onBulkUpdate={handleBulkUpdate}
               />
             )}
           </>
