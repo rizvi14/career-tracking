@@ -145,30 +145,38 @@ class ApplicationUpdate(BaseModel):
 
 def extract_job_info(text: str) -> dict:
     client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
-    response = client.chat.completions.create(
-        model="llama3.2",
-        messages=[{
-            "role": "user",
-            "content": (
-                "Extract job posting information and return ONLY a valid JSON object with these keys:\n"
-                '- "company": company name (string)\n'
-                '- "title": job title (string)\n'
-                '- "description": full job description text (string)\n'
-                '- "salary": salary/compensation info (string or null)\n'
-                '- "benefits": benefits summary (string or null)\n'
-                '- "location": job location (string or null)\n'
-                '- "job_type": one of "Full-time", "Part-time", "Contract", "Remote", "Hybrid" or null\n\n'
-                f"Job posting:\n{text}\n\n"
-                "Return ONLY the JSON object, no markdown, no explanation."
-            ),
-        }],
+    prompt = (
+        "Extract job posting information and return ONLY a valid JSON object with these keys:\n"
+        '- "company": company name (string)\n'
+        '- "title": job title (string)\n'
+        '- "description": full job description text (string)\n'
+        '- "salary": salary/compensation info (string or null)\n'
+        '- "benefits": benefits summary (string or null)\n'
+        '- "location": job location (string or null)\n'
+        '- "job_type": one of "Full-time", "Part-time", "Contract", "Remote", "Hybrid" or null\n\n'
+        f"Job posting:\n{text}\n\n"
+        "Return ONLY the JSON object, no markdown, no explanation."
     )
-    raw = response.choices[0].message.content.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    return json.loads(raw.strip())
+    last_error = None
+    for attempt in range(3):
+        try:
+            response = client.chat.completions.create(
+                model="llama3.2",
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                # Deterministic first pass; nudge temperature up on retries so a
+                # re-attempt yields a different (hopefully parseable) sample.
+                temperature=0 if attempt == 0 else 0.3,
+            )
+            raw = response.choices[0].message.content.strip()
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            return json.loads(raw.strip())
+        except Exception as e:
+            last_error = e
+    raise last_error
 
 
 async def fetch_with_playwright(url: str) -> str:
