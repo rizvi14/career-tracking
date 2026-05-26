@@ -29,4 +29,14 @@ export const api = {
 
   deleteApplication: (id) =>
     request(`/api/applications/${id}`, { method: 'DELETE' }),
+
+  bulkUpdate: (ids, field, value) =>
+    request('/api/applications/bulk-update', {
+      method: 'POST',
+      body: JSON.stringify({ ids, field, value }),
+    }),
+
+  getUndoStatus: () => request('/api/undo/status'),
+
+  undo: () => request('/api/undo', { method: 'POST' }),
 };

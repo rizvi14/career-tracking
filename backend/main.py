@@ -7,6 +7,7 @@ import httpx
 from bs4 import BeautifulSoup
 import sqlite3
 from datetime import datetime, date
+from collections import deque
 import os
 import json
 
@@ -104,6 +105,46 @@ def row_to_dict(row):
 init_db()
 
 
+# ---------------------------------------------------------------------------
+# Undo support
+#
+# Each mutating endpoint records the prior state of the rows it touches as a
+# single "action" on this stack. An action is a list of (id, before) pairs
+# where `before` is the full row dict, or None if the row did not exist yet
+# (i.e. a create). Undoing an action means, for each pair: delete the row if
+# `before` is None, otherwise write the full row back. This one primitive
+# reverses creates, edits, deletes, and bulk edits uniformly.
+#
+# The stack lives in memory, so it covers real-time undo within a session and
+# clears if the backend restarts.
+# ---------------------------------------------------------------------------
+UNDO_STACK = deque(maxlen=50)
+
+
+def snapshot(conn, app_id):
+    row = conn.execute("SELECT * FROM applications WHERE id = ?", (app_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def push_undo(label, snapshots):
+    UNDO_STACK.append({"label": label, "snapshots": snapshots})
+
+
+def restore_row(conn, app_id, before):
+    if before is None:
+        conn.execute("DELETE FROM applications WHERE id = ?", (app_id,))
+        return
+    cols = list(before.keys())
+    col_list = ", ".join(cols)
+    placeholders = ", ".join("?" for _ in cols)
+    update_clause = ", ".join(f"{c} = excluded.{c}" for c in cols if c != "id")
+    conn.execute(
+        f"INSERT INTO applications ({col_list}) VALUES ({placeholders}) "
+        f"ON CONFLICT(id) DO UPDATE SET {update_clause}",
+        [before[c] for c in cols],
+    )
+
+
 class ParseURLRequest(BaseModel):
     url: str
 
@@ -141,6 +182,15 @@ class ApplicationUpdate(BaseModel):
     tags: Optional[List[str]] = None
     tag_dates: Optional[dict] = None
     applied_date: Optional[str] = None
+
+
+BULK_ALLOWED_FIELDS = {"applied_date", "location", "salary", "job_type"}
+
+
+class BulkUpdate(BaseModel):
+    ids: List[int]
+    field: str
+    value: Optional[str] = None
 
 
 def extract_job_info(text: str) -> dict:
@@ -310,7 +360,57 @@ def create_application(data: ApplicationCreate):
     conn.commit()
     row = conn.execute("SELECT * FROM applications WHERE id = ?", (cursor.lastrowid,)).fetchone()
     conn.close()
+    push_undo(f"Add {data.company}", [(cursor.lastrowid, None)])
     return row_to_dict(row)
+
+
+@app.post("/api/applications/bulk-update")
+def bulk_update(data: BulkUpdate):
+    if data.field not in BULK_ALLOWED_FIELDS:
+        raise HTTPException(status_code=400, detail="Field not allowed for bulk update")
+    if not data.ids:
+        return []
+    conn = get_db()
+    now = datetime.now().isoformat()
+    snapshots = []
+    for app_id in data.ids:
+        before = snapshot(conn, app_id)
+        if before is None:
+            continue
+        snapshots.append((app_id, before))
+        conn.execute(
+            f"UPDATE applications SET {data.field} = ?, updated_at = ? WHERE id = ?",
+            (data.value, now, app_id),
+        )
+    conn.commit()
+    if snapshots:
+        push_undo(f"Bulk edit {data.field} ({len(snapshots)})", snapshots)
+    placeholders = ", ".join("?" for _ in data.ids)
+    rows = conn.execute(
+        f"SELECT * FROM applications WHERE id IN ({placeholders})", data.ids
+    ).fetchall()
+    conn.close()
+    return [row_to_dict(row) for row in rows]
+
+
+@app.get("/api/undo/status")
+def undo_status():
+    if not UNDO_STACK:
+        return {"can_undo": False, "label": None, "count": 0}
+    return {"can_undo": True, "label": UNDO_STACK[-1]["label"], "count": len(UNDO_STACK)}
+
+
+@app.post("/api/undo")
+def undo():
+    if not UNDO_STACK:
+        raise HTTPException(status_code=404, detail="Nothing to undo")
+    action = UNDO_STACK.pop()
+    conn = get_db()
+    for app_id, before in action["snapshots"]:
+        restore_row(conn, app_id, before)
+    conn.commit()
+    conn.close()
+    return {"ok": True, "label": action["label"], "remaining": len(UNDO_STACK)}
 
 
 @app.get("/api/applications/{app_id}")
@@ -331,6 +431,7 @@ def update_application(app_id: int, data: ApplicationUpdate):
         conn.close()
         raise HTTPException(status_code=404, detail="Not found")
 
+    before = dict(row)
     updates = {k: v for k, v in data.dict(exclude_unset=True).items()}
     # Pull out incoming tag_dates before building SET clause
     incoming_td = updates.pop('tag_dates', None)
@@ -370,13 +471,17 @@ def update_application(app_id: int, data: ApplicationUpdate):
     conn.commit()
     row = conn.execute("SELECT * FROM applications WHERE id = ?", (app_id,)).fetchone()
     conn.close()
+    push_undo(f"Edit {before.get('company', '')}", [(app_id, before)])
     return row_to_dict(row)
 
 
 @app.delete("/api/applications/{app_id}")
 def delete_application(app_id: int):
     conn = get_db()
+    before = snapshot(conn, app_id)
     conn.execute("DELETE FROM applications WHERE id = ?", (app_id,))
     conn.commit()
     conn.close()
+    if before is not None:
+        push_undo(f"Delete {before.get('company', '')}", [(app_id, before)])
     return {"ok": True}
