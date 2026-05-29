@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api';
 import { STATUSES } from '../constants';
-import { X, Link2, Loader2, AlertCircle, Trash2 } from 'lucide-react';
+import { X, Loader2, AlertCircle, Trash2 } from 'lucide-react';
 
 const today = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
 
@@ -41,7 +41,6 @@ export default function ApplicationModal({ isOpen, onClose, onSave, onDelete, in
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [pasteMode, setPasteMode] = useState(false);
   const [pasteText, setPasteText] = useState('');
 
   useEffect(() => {
@@ -66,7 +65,6 @@ export default function ApplicationModal({ isOpen, onClose, onSave, onDelete, in
       setForm({ ...EMPTY, applied_date: today(), tag_dates: { Application: today() } });
     }
     setParseError('');
-    setPasteMode(false);
     setPasteText('');
   }, [initialData, isOpen]);
 
@@ -109,36 +107,16 @@ export default function ApplicationModal({ isOpen, onClose, onSave, onDelete, in
   };
 
   const handleParse = async () => {
-    if (pasteMode) {
-      if (!pasteText.trim()) return;
-      setParsing(true);
-      setParseError('');
-      try {
-        const data = await api.parseText(pasteText.trim());
-        applyParsedData(data);
-      } catch (e) {
-        setParseError(e.message || 'Failed to parse pasted text.');
-      } finally {
-        setParsing(false);
-      }
-    } else {
-      if (!form.url.trim()) return;
-      setParsing(true);
-      setParseError('');
-      try {
-        const data = await api.parseUrl(form.url.trim());
-        applyParsedData(data);
-      } catch (e) {
-        if (e.message === 'PAGE_BLOCKED') {
-          // Page is login-walled or bot-blocked — auto-switch to paste mode
-          setPasteMode(true);
-          setParseError("This page couldn't be fetched automatically (login wall or bot protection). Paste the job text below and hit Parse Job.");
-        } else {
-          setParseError(e.message || 'Failed to parse URL. You can fill in the fields manually.');
-        }
-      } finally {
-        setParsing(false);
-      }
+    if (!pasteText.trim()) return;
+    setParsing(true);
+    setParseError('');
+    try {
+      const data = await api.parseText(pasteText.trim());
+      applyParsedData(data);
+    } catch (e) {
+      setParseError(e.message || 'Failed to parse pasted text.');
+    } finally {
+      setParsing(false);
     }
   };
 
@@ -173,47 +151,24 @@ export default function ApplicationModal({ isOpen, onClose, onSave, onDelete, in
 
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-          {/* URL parser */}
-          <Field label="Job Posting">
+          {/* Job text parser */}
+          <Field label="Paste Job Description">
             <div className="flex gap-2">
-              {pasteMode ? (
-                <textarea
-                  value={pasteText}
-                  onChange={(e) => setPasteText(e.target.value)}
-                  rows={4}
-                  placeholder="Paste job text (select-all from the job page) or raw page source (right-click → View Page Source, then Ctrl+A, Ctrl+C)…"
-                  className="flex-1 px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono"
-                />
-              ) : (
-                <div className="relative flex-1">
-                  <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input
-                    type="url"
-                    value={form.url}
-                    onChange={set('url')}
-                    onKeyDown={(e) => e.key === 'Enter' && handleParse()}
-                    placeholder="https://..."
-                    className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              )}
+              <textarea
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                rows={5}
+                placeholder="Paste the full job posting text here, then click Parse Job…"
+                className="flex-1 px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono"
+              />
               <button
                 type="button"
                 onClick={handleParse}
-                disabled={parsing || (pasteMode ? !pasteText.trim() : !form.url.trim())}
-                className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                disabled={parsing || !pasteText.trim()}
+                className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap self-start"
               >
                 {parsing && <Loader2 className="w-4 h-4 animate-spin" />}
                 {parsing ? 'Parsing…' : 'Parse Job'}
-              </button>
-            </div>
-            <div className="mt-1.5 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => { setPasteMode((v) => !v); setParseError(''); }}
-                className="text-xs text-blue-600 hover:underline"
-              >
-                {pasteMode ? '← Back to URL' : 'Page not parsing? Paste page source instead'}
               </button>
             </div>
             {parseError && (
@@ -222,6 +177,16 @@ export default function ApplicationModal({ isOpen, onClose, onSave, onDelete, in
                 {parseError}
               </p>
             )}
+          </Field>
+
+          <Field label="Job URL">
+            <input
+              type="url"
+              value={form.url}
+              onChange={set('url')}
+              placeholder="https://… (optional — saved as a clickable link)"
+              className={inputCls}
+            />
           </Field>
 
           <div className="border-t border-gray-100" />
@@ -349,7 +314,7 @@ export default function ApplicationModal({ isOpen, onClose, onSave, onDelete, in
               onChange={set('description')}
               rows={7}
               className={`${inputCls} resize-y font-mono text-xs leading-relaxed`}
-              placeholder="Job description will be auto-filled when parsing a URL…"
+              placeholder="Job description will be auto-filled when you parse a pasted posting…"
             />
           </Field>
 
@@ -360,7 +325,7 @@ export default function ApplicationModal({ isOpen, onClose, onSave, onDelete, in
               onChange={set('benefits')}
               rows={3}
               className={`${inputCls} resize-y`}
-              placeholder="Benefits will be auto-filled when parsing a URL…"
+              placeholder="Benefits will be auto-filled when you parse a pasted posting…"
             />
           </Field>
 

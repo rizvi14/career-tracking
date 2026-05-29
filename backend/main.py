@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 from openai import OpenAI
-import httpx
 from bs4 import BeautifulSoup
 import sqlite3
 from datetime import datetime, date
@@ -145,10 +144,6 @@ def restore_row(conn, app_id, before):
     )
 
 
-class ParseURLRequest(BaseModel):
-    url: str
-
-
 class ParseTextRequest(BaseModel):
     text: str
 
@@ -194,29 +189,41 @@ class BulkUpdate(BaseModel):
 
 
 def extract_job_info(text: str) -> dict:
+    """Ask llama3.2 only for the short metadata fields. The description is the pasted
+    text itself — there's no reason to make the model regenerate it, since that's the
+    slowest part of local inference (output tokens). Benefits is short enough to be
+    worth asking for verbatim."""
     client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
-    prompt = (
-        "Extract job posting information and return ONLY a valid JSON object with these keys:\n"
-        '- "company": company name (string)\n'
-        '- "title": job title (string)\n'
-        '- "description": full job description text (string)\n'
-        '- "salary": salary/compensation info (string or null)\n'
-        '- "benefits": benefits summary (string or null)\n'
-        '- "location": job location (string or null)\n'
-        '- "job_type": one of "Full-time", "Part-time", "Contract", "Remote", "Hybrid" or null\n\n'
+    system_prompt = (
+        "You are a precise job posting parser. Extract structured fields and return ONLY a valid JSON object. "
+        "Never refuse, never explain — just return JSON."
+    )
+    user_prompt = (
+        "Read the job posting below and return ONLY a JSON object with exactly these keys:\n\n"
+        '- "company": hiring company name (string, or null if not stated)\n'
+        '- "title": exact job title (string, or null)\n'
+        '- "salary": salary range or compensation if mentioned (string, or null)\n'
+        '- "location": city/state/country or "Remote" (string, or null)\n'
+        '- "job_type": one of "Full-time", "Part-time", "Contract", "Remote", "Hybrid", or null\n'
+        '- "benefits": a concise string listing ALL perks mentioned — health/dental/vision, 401k, '
+        "PTO, equity, bonuses, parental leave, professional development, wellness, etc. "
+        "Copy the relevant text verbatim. Use null if none mentioned.\n\n"
         f"Job posting:\n{text}\n\n"
-        "Return ONLY the JSON object, no markdown, no explanation."
+        "Return ONLY the JSON. No markdown, no explanation."
     )
     last_error = None
-    for attempt in range(3):
+    for attempt in range(2):
         try:
             response = client.chat.completions.create(
                 model="llama3.2",
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
                 response_format={"type": "json_object"},
-                # Deterministic first pass; nudge temperature up on retries so a
-                # re-attempt yields a different (hopefully parseable) sample.
                 temperature=0 if attempt == 0 else 0.3,
+                # Cap output — we only need ~6 short fields plus a benefits blurb
+                max_tokens=600,
             )
             raw = response.choices[0].message.content.strip()
             if raw.startswith("```"):
@@ -227,67 +234,6 @@ def extract_job_info(text: str) -> dict:
         except Exception as e:
             last_error = e
     raise last_error
-
-
-async def fetch_with_playwright(url: str) -> str:
-    from playwright.async_api import async_playwright
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        try:
-            page = await browser.new_page()
-            await page.goto(url, wait_until="networkidle", timeout=30000)
-            html = await page.content()
-        finally:
-            await browser.close()
-    return html
-
-
-def has_useful_content(result: dict) -> bool:
-    return bool(result.get("company") or result.get("title"))
-
-
-@app.post("/api/parse-url")
-async def parse_url(request: ParseURLRequest):
-    try:
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-        }
-
-        # Pass 1 — fast httpx fetch + JSON-LD aware extraction
-        try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=20) as client:
-                response = await client.get(request.url, headers=headers)
-                html = response.text
-            text = extract_text_from_input(html)
-            result = extract_job_info(text)
-            if has_useful_content(result):
-                return result
-        except Exception:
-            pass
-
-        # Pass 2 — headless Chromium renders the full page (handles JS-heavy ATS sites)
-        try:
-            html = await fetch_with_playwright(request.url)
-            text = extract_text_from_input(html)
-            result = extract_job_info(text)
-            if has_useful_content(result):
-                return result
-        except Exception:
-            pass
-
-        # Nothing worked — page likely requires a login
-        raise HTTPException(status_code=422, detail="PAGE_BLOCKED")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
 
 def extract_text_from_input(content: str) -> str:
@@ -307,8 +253,8 @@ def extract_text_from_input(content: str) -> str:
             tag.decompose()
         page_text = soup.get_text(separator="\n", strip=True)
         combined = f"{json_ld_text}\n\n{page_text}"
-        return combined[:8000]
-    return content[:8000]
+        return combined[:12000]
+    return content[:12000]
 
 
 @app.post("/api/parse-text")
@@ -319,6 +265,9 @@ async def parse_text(request: ParseTextRequest):
             raise HTTPException(status_code=400, detail="No text provided.")
         text = extract_text_from_input(content)
         result = extract_job_info(text)
+        # The pasted text IS the description — no need to spend output tokens
+        # regenerating it. Strip JSON-LD noise if extract_text_from_input prepended it.
+        result["description"] = text.strip()
         return result
     except json.JSONDecodeError:
         raise HTTPException(status_code=422, detail="Could not parse job info from the pasted content.")

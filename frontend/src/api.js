@@ -13,9 +13,6 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  parseUrl: (url) =>
-    request('/api/parse-url', { method: 'POST', body: JSON.stringify({ url }) }),
-
   parseText: (text) =>
     request('/api/parse-text', { method: 'POST', body: JSON.stringify({ text }) }),
 
