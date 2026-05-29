@@ -118,7 +118,7 @@ export default function App() {
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-2.5">
               <Briefcase className="w-5 h-5 text-blue-600" />
-              <span className="text-lg font-semibold text-gray-900">Career Tracker</span>
+              <span className="text-lg font-semibold text-gray-900">Job Application Tracker</span>
             </div>
             <nav className="flex items-center gap-1">
               <button
