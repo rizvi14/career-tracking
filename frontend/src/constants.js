@@ -10,6 +10,7 @@ export const STATUSES = [
   { value: 'Rejected',       color: '#6B7280' }, // gray
   { value: 'Withdrew',        color: '#94A3B8' }, // slate
   { value: 'Position Filled', color: '#DC2626' }, // red
+  { value: 'Role Cancelled',  color: '#BE123C' }, // rose
 ];
 
 export const STATUS_MAP = Object.fromEntries(STATUSES.map((s) => [s.value, s]));

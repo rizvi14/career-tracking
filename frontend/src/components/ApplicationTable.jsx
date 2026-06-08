@@ -4,7 +4,7 @@ import { Pencil, Trash2, ExternalLink, Search, FileText, AlertTriangle, Calendar
 import StatusBadge from './StatusBadge';
 import { findDuplicateIds } from '../duplicates';
 
-const TERMINAL_TAGS = ['Rejected', 'Withdrew', 'Position Filled'];
+const TERMINAL_TAGS = ['Rejected', 'Withdrew', 'Position Filled', 'Role Cancelled'];
 
 const BULK_FIELDS = [
   { label: 'Date Applied', value: 'applied_date' },

@@ -37,7 +37,7 @@ import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { STATUSES } from '../constants';
 import { findDuplicateGroups } from '../duplicates';
 
-function StatCard({ label, value, color, items }) {
+function StatCard({ label, value, color, items, popupLabel }) {
   const [open, setOpen] = useState(false);
   return (
     <div
@@ -49,7 +49,7 @@ function StatCard({ label, value, color, items }) {
       <p className={`text-3xl font-bold ${color}`}>{value}</p>
       {open && items && items.length > 0 && (
         <div className="absolute left-0 top-full mt-2 z-50 bg-white border border-gray-200 rounded-xl shadow-lg p-3 min-w-[260px]">
-          <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">Active interviews</p>
+          <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">{popupLabel ?? 'Applications'}</p>
           <div className="space-y-2">
             {items.map((app) => (
               <div key={app.id} className="flex items-center justify-between gap-3">
@@ -77,9 +77,9 @@ export default function Analytics({ applications }) {
     const getTags = (a) => (Array.isArray(a.tags) ? a.tags : [a.status ?? 'Application']);
     const total = applications.length;
     const active = applications.filter(
-      (a) => !['Rejected', 'Withdrew', 'Offer'].some((s) => getTags(a).includes(s))
+      (a) => !['Rejected', 'Withdrew', 'Offer', 'Role Cancelled'].some((s) => getTags(a).includes(s))
     ).length;
-    const TERMINAL = ['Rejected', 'Withdrew', 'Position Filled'];
+    const TERMINAL = ['Rejected', 'Withdrew', 'Position Filled', 'Role Cancelled'];
     const INTERVIEW_STAGE_ORDER = ['Final', 'Panel', 'Presentation', 'Technical', 'Hiring Manager', 'Phone Screen'];
     const inInterviewApps = applications.filter((a) => {
       const tags = getTags(a);
@@ -94,9 +94,22 @@ export default function Analytics({ applications }) {
       return { ...a, latestStage, latestStageColor: stageInfo?.color ?? '#6B7280' };
     });
     const inInterview = inInterviewApps.length;
-    const finalRound = applications.filter((a) => getTags(a).includes('Final')).length;
-    const phoneScreens = applications.filter((a) => getTags(a).includes('Phone Screen')).length;
-    const offers = applications.filter((a) => getTags(a).includes('Offer')).length;
+
+    // Decorate an app with a badge stage (most advanced tag present) for hover popups
+    const STAGE_PRIORITY = ['Offer', ...INTERVIEW_STAGE_ORDER, 'Position Filled', 'Role Cancelled', 'Rejected', 'Withdrew'];
+    const decorate = (a) => {
+      const tags = getTags(a);
+      const latestStage = STAGE_PRIORITY.find((s) => tags.includes(s)) ?? tags[tags.length - 1];
+      const stageInfo = STATUSES.find((s) => s.value === latestStage);
+      return { ...a, latestStage, latestStageColor: stageInfo?.color ?? '#6B7280' };
+    };
+
+    const finalRoundApps = applications.filter((a) => getTags(a).includes('Final')).map(decorate);
+    const finalRound = finalRoundApps.length;
+    const phoneScreenStageApps = applications.filter((a) => getTags(a).includes('Phone Screen')).map(decorate);
+    const phoneScreens = phoneScreenStageApps.length;
+    const offerApps = applications.filter((a) => getTags(a).includes('Offer')).map(decorate);
+    const offers = offerApps.length;
 
     // Pie chart data — count each tag across all applications
     const statusCounts = STATUSES.map((s) => ({
@@ -192,8 +205,9 @@ export default function Analytics({ applications }) {
       : null;
 
     return {
-      total, active, phoneScreens, inInterview, inInterviewApps, finalRound, offers,
-      phoneScreenRatio, phoneScreenCount: phoneScreenApps.length,
+      total, active, phoneScreens, phoneScreenStageApps, inInterview, inInterviewApps,
+      finalRound, finalRoundApps, offers, offerApps,
+      phoneScreenRatio, phoneScreenCount: phoneScreenApps.length, phoneScreenRateApps: phoneScreenApps.map(decorate),
       statusCounts, cumulativeData, weeklyData, duplicateGroups,
       avgToPhoneScreen, phoneScreenCount: phoneScreenApps.length,
       avgToRejection, ghostRejectionCount: ghostRejectedApps.length,
@@ -215,14 +229,16 @@ export default function Analytics({ applications }) {
       {/* Stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-6 gap-4 mb-4">
         <StatCard label="Total Applications" value={stats.total} color="text-gray-900" />
-        <StatCard label="Phone Screens" value={stats.phoneScreens} color="text-blue-600" />
-        <StatCard label="In Interviews" value={stats.inInterview} color="text-purple-600" items={stats.inInterviewApps} />
-        <StatCard label="Final Round" value={stats.finalRound} color="text-pink-600" />
-        <StatCard label="Offers" value={stats.offers} color="text-emerald-600" />
+        <StatCard label="Phone Screens" value={stats.phoneScreens} color="text-blue-600" items={stats.phoneScreenStageApps} popupLabel="Reached phone screen" />
+        <StatCard label="In Interviews" value={stats.inInterview} color="text-purple-600" items={stats.inInterviewApps} popupLabel="Active interviews" />
+        <StatCard label="Final Round" value={stats.finalRound} color="text-pink-600" items={stats.finalRoundApps} popupLabel="Final round" />
+        <StatCard label="Offers" value={stats.offers} color="text-emerald-600" items={stats.offerApps} popupLabel="Offers" />
         <StatCard
           label="Phone Screen Rate"
           value={stats.phoneScreenRatio !== null ? `${stats.phoneScreenRatio}%` : '—'}
           color="text-violet-600"
+          items={stats.phoneScreenRateApps}
+          popupLabel="Reached phone screen"
         />
       </div>
 
