@@ -77,9 +77,9 @@ export default function Analytics({ applications }) {
     const getTags = (a) => (Array.isArray(a.tags) ? a.tags : [a.status ?? 'Application']);
     const total = applications.length;
     const active = applications.filter(
-      (a) => !['Rejected', 'Withdrew', 'Offer', 'Role Cancelled'].some((s) => getTags(a).includes(s))
+      (a) => !['Rejected', 'Withdrew', 'Offer', 'Offer Accepted', 'Role Cancelled'].some((s) => getTags(a).includes(s))
     ).length;
-    const TERMINAL = ['Rejected', 'Withdrew', 'Position Filled', 'Role Cancelled'];
+    const TERMINAL = ['Rejected', 'Withdrew', 'Position Filled', 'Role Cancelled', 'Offer Accepted'];
     const INTERVIEW_STAGE_ORDER = ['Final', 'Panel', 'Presentation', 'Technical', 'Hiring Manager', 'Phone Screen'];
     const inInterviewApps = applications.filter((a) => {
       const tags = getTags(a);
@@ -96,7 +96,7 @@ export default function Analytics({ applications }) {
     const inInterview = inInterviewApps.length;
 
     // Decorate an app with a badge stage (most advanced tag present) for hover popups
-    const STAGE_PRIORITY = ['Offer', ...INTERVIEW_STAGE_ORDER, 'Position Filled', 'Role Cancelled', 'Rejected', 'Withdrew'];
+    const STAGE_PRIORITY = ['Offer Accepted', 'Offer', ...INTERVIEW_STAGE_ORDER, 'Position Filled', 'Role Cancelled', 'Rejected', 'Withdrew'];
     const decorate = (a) => {
       const tags = getTags(a);
       const latestStage = STAGE_PRIORITY.find((s) => tags.includes(s)) ?? tags[tags.length - 1];
@@ -108,8 +108,10 @@ export default function Analytics({ applications }) {
     const finalRound = finalRoundApps.length;
     const phoneScreenStageApps = applications.filter((a) => getTags(a).includes('Phone Screen')).map(decorate);
     const phoneScreens = phoneScreenStageApps.length;
-    const offerApps = applications.filter((a) => getTags(a).includes('Offer')).map(decorate);
+    const offerApps = applications.filter((a) => getTags(a).some((t) => t === 'Offer' || t === 'Offer Accepted')).map(decorate);
     const offers = offerApps.length;
+    const acceptedApps = applications.filter((a) => getTags(a).includes('Offer Accepted')).map(decorate);
+    const accepted = acceptedApps.length;
 
     // Pie chart data — count each tag across all applications
     const statusCounts = STATUSES.map((s) => ({
@@ -206,7 +208,7 @@ export default function Analytics({ applications }) {
 
     return {
       total, active, phoneScreens, phoneScreenStageApps, inInterview, inInterviewApps,
-      finalRound, finalRoundApps, offers, offerApps,
+      finalRound, finalRoundApps, offers, offerApps, accepted, acceptedApps,
       phoneScreenRatio, phoneScreenCount: phoneScreenApps.length, phoneScreenRateApps: phoneScreenApps.map(decorate),
       statusCounts, cumulativeData, weeklyData, duplicateGroups,
       avgToPhoneScreen, phoneScreenCount: phoneScreenApps.length,
@@ -227,12 +229,13 @@ export default function Analytics({ applications }) {
       <h2 className="text-2xl font-bold text-gray-900 mb-6">Analytics</h2>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-6 gap-4 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-7 gap-4 mb-4">
         <StatCard label="Total Applications" value={stats.total} color="text-gray-900" />
         <StatCard label="Phone Screens" value={stats.phoneScreens} color="text-blue-600" items={stats.phoneScreenStageApps} popupLabel="Reached phone screen" />
         <StatCard label="In Interviews" value={stats.inInterview} color="text-purple-600" items={stats.inInterviewApps} popupLabel="Active interviews" />
         <StatCard label="Final Round" value={stats.finalRound} color="text-pink-600" items={stats.finalRoundApps} popupLabel="Final round" />
         <StatCard label="Offers" value={stats.offers} color="text-emerald-600" items={stats.offerApps} popupLabel="Offers" />
+        <StatCard label="Accepted" value={stats.accepted} color="text-emerald-700" items={stats.acceptedApps} popupLabel="Offer accepted" />
         <StatCard
           label="Phone Screen Rate"
           value={stats.phoneScreenRatio !== null ? `${stats.phoneScreenRatio}%` : '—'}

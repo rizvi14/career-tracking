@@ -7,6 +7,7 @@ export const STATUSES = [
   { value: 'Panel',          color: '#F97316' }, // orange
   { value: 'Final',          color: '#EC4899' }, // pink
   { value: 'Offer',          color: '#10B981' }, // emerald
+  { value: 'Offer Accepted', color: '#047857' }, // emerald-700 (won)
   { value: 'Rejected',       color: '#6B7280' }, // gray
   { value: 'Withdrew',        color: '#94A3B8' }, // slate
   { value: 'Position Filled', color: '#DC2626' }, // red

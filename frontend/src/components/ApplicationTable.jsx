@@ -5,6 +5,8 @@ import StatusBadge from './StatusBadge';
 import { findDuplicateIds } from '../duplicates';
 
 const TERMINAL_TAGS = ['Rejected', 'Withdrew', 'Position Filled', 'Role Cancelled'];
+const WON_TAGS = ['Offer Accepted'];
+const CLOSED_TAGS = [...TERMINAL_TAGS, ...WON_TAGS];
 
 const BULK_FIELDS = [
   { label: 'Date Applied', value: 'applied_date' },
@@ -12,7 +14,7 @@ const BULK_FIELDS = [
 
 function daysSinceLastUpdate(app) {
   const tags = Array.isArray(app.tags) ? app.tags : [app.status ?? 'Application'];
-  if (TERMINAL_TAGS.some((t) => tags.includes(t))) return null;
+  if (CLOSED_TAGS.some((t) => tags.includes(t))) return null;
   const tagDates = app.tag_dates && typeof app.tag_dates === 'object' ? app.tag_dates : {};
   const dates = Object.values(tagDates).filter(Boolean);
   if (app.applied_date) dates.push(app.applied_date);
@@ -224,6 +226,7 @@ export default function ApplicationTable({ applications, onEdit, onDelete, onBul
                 const tags = getTags(app);
                 const tagDates = getTagDates(app);
                 const isRejected = TERMINAL_TAGS.some((t) => tags.includes(t));
+                const isWon = WON_TAGS.some((t) => tags.includes(t));
                 const isSelected = selected.has(app.id);
                 return (
                 <tr
@@ -232,6 +235,8 @@ export default function ApplicationTable({ applications, onEdit, onDelete, onBul
                   className={`transition-colors cursor-pointer ${
                     isSelected
                       ? 'bg-blue-50/60'
+                      : isWon
+                      ? 'bg-emerald-50/70 hover:bg-emerald-100/70'
                       : isRejected
                       ? 'bg-gray-50/80 hover:bg-gray-100/80'
                       : 'hover:bg-gray-50/60'
