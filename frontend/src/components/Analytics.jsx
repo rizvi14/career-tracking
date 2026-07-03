@@ -37,6 +37,157 @@ import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { STATUSES } from '../constants';
 import { findDuplicateGroups } from '../duplicates';
 
+// A filled path that connects a vertical band on the left to one on the right,
+// with smooth cubic edges — the classic Sankey ribbon.
+function ribbonPath(x0, y0t, y0b, x1, y1t, y1b) {
+  const cx = (x0 + x1) / 2;
+  return `M${x0},${y0t} C${cx},${y0t} ${cx},${y1t} ${x1},${y1t} L${x1},${y1b} C${cx},${y1b} ${cx},${y0b} ${x0},${y0b} Z`;
+}
+
+// The Grind — a true dense Sankey. The pipeline runs along a top baseline; at every
+// stage the apps that don't advance peel off downward into labeled exit nodes
+// (rejections / no-response). Ribbon thickness is proportional to volume, so the
+// brutal first cut reads as one fat flow and the survivors thread through to the offer.
+function GrindSankey({ stages, noResponse, closedNoInterview, acceptedCompany }) {
+  const [hover, setHover] = useState(null); // hovered stage index
+  const VB_W = 1000;
+  const VB_H = 470;
+  const padL = 60;
+  const padR = 132;
+  const top = 58;
+  const nodeW = 18;
+  const n = stages.length;
+  const colGap = (VB_W - padL - padR - nodeW) / (n - 1);
+  const maxCount = Math.max(...stages.map((s) => s.count), 1);
+  const maxH = 176;
+  const minH = 9;
+  const scale = (c) => Math.max(minH, (maxH * c) / maxCount);
+
+  const S = stages.map((s, i) => {
+    const h = scale(s.count);
+    const x = padL + i * colGap;
+    return { ...s, x, cx: x + nodeW / 2, h, top, bottom: top + h };
+  });
+
+  // Exit (drop-off) nodes per gap, stacked in a lower band.
+  const REJ = '#FB7185'; // rose
+  const GHOST = '#94A3B8'; // slate
+  const exitTop = top + maxH + 46;
+  const exits = [];
+  for (let i = 0; i < n - 1; i++) {
+    const drop = stages[i].count - stages[i + 1].count;
+    if (drop <= 0) continue;
+    let list;
+    if (i === 0) {
+      list = [
+        { label: 'No response', count: noResponse, color: GHOST },
+        { label: 'Rejected', count: closedNoInterview, color: REJ },
+      ].filter((e) => e.count > 0);
+    } else if (i === n - 2) {
+      list = [{ label: 'Declined / other', count: drop, color: GHOST }];
+    } else {
+      list = [{ label: 'Rejected', count: drop, color: REJ }];
+    }
+    // place this gap's exit stack at the mid-point between the two stages
+    const ex = S[i].x + nodeW + (colGap - nodeW) * 0.42;
+    let stackY = exitTop;
+    list.forEach((e, k) => {
+      const h = scale(e.count);
+      exits.push({ ...e, gap: i, x: ex, h, top: stackY, bottom: stackY + h, key: `${i}-${k}` });
+      stackY += h + 12;
+    });
+  }
+
+  const dimGap = (i) => hover !== null && hover !== i && hover !== i + 1;
+
+  return (
+    <svg viewBox={`0 0 ${VB_W} ${VB_H}`} width="100%" style={{ display: 'block', height: 'auto' }}>
+      <defs>
+        {S.map((s, i) => (
+          <linearGradient key={`ng-${i}`} id={`gsNode-${i}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={s.color} stopOpacity={1} />
+            <stop offset="100%" stopColor={s.color} stopOpacity={0.72} />
+          </linearGradient>
+        ))}
+        {S.slice(0, -1).map((s, i) => (
+          <linearGradient key={`ag-${i}`} id={`gsAdv-${i}`} x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor={s.color} />
+            <stop offset="100%" stopColor={S[i + 1].color} />
+          </linearGradient>
+        ))}
+      </defs>
+
+      {/* Ribbons: advancing flow (top band) + rejection flows (peeling off below) */}
+      {S.slice(0, -1).map((s, i) => {
+        const adv = S[i + 1];
+        const x0 = s.x + nodeW;
+        const advBot = top + adv.h; // advancing band is top-aligned, height == next stage
+        const active = !dimGap(i);
+        // rejection sub-bands start right below the advancing band on the source edge
+        let srcY = advBot;
+        const gapExits = exits.filter((e) => e.gap === i);
+        return (
+          <g key={`flows-${i}`}>
+            <path
+              d={ribbonPath(x0, top, advBot, adv.x, top, top + adv.h)}
+              fill={`url(#gsAdv-${i})`}
+              fillOpacity={active ? 0.85 : 0.3}
+              style={{ transition: 'fill-opacity 0.2s' }}
+            />
+            {gapExits.map((e) => {
+              const path = ribbonPath(x0, srcY, srcY + e.h, e.x, e.top, e.bottom);
+              srcY += e.h;
+              return (
+                <path
+                  key={`rej-${e.key}`}
+                  d={path}
+                  fill={e.color}
+                  fillOpacity={hover === null || hover === i ? 0.5 : 0.18}
+                  style={{ transition: 'fill-opacity 0.2s' }}
+                />
+              );
+            })}
+          </g>
+        );
+      })}
+
+      {/* Exit nodes + labels */}
+      {exits.map((e) => (
+        <g key={`exit-${e.key}`} opacity={hover === null || hover === e.gap ? 1 : 0.45} style={{ transition: 'opacity 0.2s' }}>
+          <rect x={e.x} y={e.top} width={nodeW} height={e.h} rx={4} fill={e.color} />
+          <text x={e.x + nodeW + 8} y={e.top + e.h / 2} dominantBaseline="middle" fontSize={11}>
+            <tspan fontWeight={700} fill="#475569">{e.count.toLocaleString()}</tspan>
+            <tspan dx={5} fill="#94A3B8">{e.label}</tspan>
+          </text>
+        </g>
+      ))}
+
+      {/* Stage nodes + labels */}
+      {S.map((s, i) => {
+        const dim = hover !== null && hover !== i;
+        return (
+          <g
+            key={`stage-${i}`}
+            opacity={dim ? 0.6 : 1}
+            style={{ transition: 'opacity 0.2s', cursor: 'default' }}
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover(null)}
+          >
+            {s.win && <rect x={s.x - 5} y={s.top - 5} width={nodeW + 10} height={s.h + 10} rx={7} fill={s.color} fillOpacity={0.18} />}
+            <rect x={s.x} y={s.top} width={nodeW} height={s.h} rx={4} fill={`url(#gsNode-${i})`} />
+            <text x={s.cx} y={s.top - 22} textAnchor="middle" fontSize={11.5} fontWeight={s.win ? 700 : 600} fill={s.color}>
+              {s.win ? `${acceptedCompany ?? 'Accepted'} 🎉` : s.label}
+            </text>
+            <text x={s.cx} y={s.top - 8} textAnchor="middle" fontSize={13} fontWeight={800} fill="#1F2937">
+              {s.count.toLocaleString()}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 function StatCard({ label, value, color, items, popupLabel }) {
   const [open, setOpen] = useState(false);
   return (
@@ -214,6 +365,34 @@ export default function Analytics({ applications }) {
       avgToPhoneScreen, phoneScreenCount: phoneScreenApps.length,
       avgToRejection, ghostRejectionCount: ghostRejectedApps.length,
     };
+  }, [applications]);
+
+  const { funnelStages, noResponse, closedNoInterview, acceptedCompany } = useMemo(() => {
+    const getTags = (a) => (Array.isArray(a.tags) ? a.tags : [a.status ?? 'Application']);
+    const LADDER = ['Phone Screen', 'Hiring Manager', 'Technical', 'Presentation', 'Panel', 'Final', 'Offer', 'Offer Accepted'];
+    const TERMINAL = ['Rejected', 'Withdrew', 'Position Filled', 'Role Cancelled'];
+    const furthest = (a) => getTags(a).reduce((m, t) => Math.max(m, LADDER.indexOf(t)), -1);
+    const reached = (threshold) => applications.filter((a) => furthest(a) >= threshold).length;
+
+    const acceptedCompany = applications.find((a) => getTags(a).includes('Offer Accepted'))?.company ?? null;
+
+    // Advancing stages, left → right. Each `reached(idx)` = apps whose furthest
+    // ladder stage is at least that index (so non-linear paths still count).
+    const stages = [
+      { label: 'Applications', count: applications.length, color: '#3B82F6' },
+      { label: 'Phone Screen', count: reached(0),          color: '#8B5CF6' },
+      { label: 'Interviewing', count: reached(1),          color: '#06B6D4' },
+      { label: 'Final Round',  count: reached(5),          color: '#EC4899' },
+      { label: 'Offer',        count: reached(6),          color: '#10B981' },
+      { label: 'Accepted',     count: reached(7),          color: '#047857', win: true },
+    ];
+
+    // Split the first (huge) drop into "never heard back" vs "explicitly closed".
+    const neverAdvanced = applications.filter((a) => furthest(a) < 0);
+    const closedNoInterview = neverAdvanced.filter((a) => getTags(a).some((t) => TERMINAL.includes(t))).length;
+    const noResponse = neverAdvanced.length - closedNoInterview;
+
+    return { funnelStages: stages, noResponse, closedNoInterview, acceptedCompany };
   }, [applications]);
 
   if (applications.length === 0) {
@@ -421,6 +600,22 @@ export default function Analytics({ applications }) {
           </div>
         )}
       </div>
+
+      {/* The Grind — application Sankey */}
+      {funnelStages[0].count > 0 && (
+        <div className="mt-6 bg-gradient-to-br from-white to-gray-50/60 rounded-xl border border-gray-200 p-6">
+          <h3 className="text-sm font-semibold text-gray-700 mb-1">The Grind → Offer</h3>
+          <p className="text-xs text-gray-400 mb-2">
+            Every application flowing down to the {acceptedCompany ?? 'final'} offer — and everything lost along the way.
+          </p>
+          <GrindSankey
+            stages={funnelStages}
+            noResponse={noResponse}
+            closedNoInterview={closedNoInterview}
+            acceptedCompany={acceptedCompany}
+          />
+        </div>
+      )}
     </div>
   );
 }
