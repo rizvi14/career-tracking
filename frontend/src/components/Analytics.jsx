@@ -37,6 +37,13 @@ import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { STATUSES } from '../constants';
 import { findDuplicateGroups } from '../duplicates';
 
+// Canonical progression ladder, shared by the stat cards and the funnel so both
+// treat advancement the same way. `furthest` returns an app's most-advanced rung
+// (>= 0 index), or -1 if it never entered the ladder. Because Offer/Offer Accepted
+// rank above Final, an app that reached an offer counts as having passed Final.
+const LADDER = ['Phone Screen', 'Hiring Manager', 'Technical', 'Presentation', 'Panel', 'Final', 'Offer', 'Offer Accepted'];
+const furthest = (a) => (Array.isArray(a.tags) ? a.tags : [a.status ?? 'Application']).reduce((m, t) => Math.max(m, LADDER.indexOf(t)), -1);
+
 // A filled path that connects a vertical band on the left to one on the right,
 // with smooth cubic edges — the classic Sankey ribbon.
 function ribbonPath(x0, y0t, y0b, x1, y1t, y1b) {
@@ -255,7 +262,9 @@ export default function Analytics({ applications }) {
       return { ...a, latestStage, latestStageColor: stageInfo?.color ?? '#6B7280' };
     };
 
-    const finalRoundApps = applications.filter((a) => getTags(a).includes('Final')).map(decorate);
+    // Cumulative "reached Final or beyond" — matches the funnel's Final Round node,
+    // so an app that advanced straight to an Offer still counts here.
+    const finalRoundApps = applications.filter((a) => furthest(a) >= LADDER.indexOf('Final')).map(decorate);
     const finalRound = finalRoundApps.length;
     const phoneScreenStageApps = applications.filter((a) => getTags(a).includes('Phone Screen')).map(decorate);
     const phoneScreens = phoneScreenStageApps.length;
@@ -369,9 +378,7 @@ export default function Analytics({ applications }) {
 
   const { funnelStages, noResponse, closedNoInterview, acceptedCompany } = useMemo(() => {
     const getTags = (a) => (Array.isArray(a.tags) ? a.tags : [a.status ?? 'Application']);
-    const LADDER = ['Phone Screen', 'Hiring Manager', 'Technical', 'Presentation', 'Panel', 'Final', 'Offer', 'Offer Accepted'];
     const TERMINAL = ['Rejected', 'Withdrew', 'Position Filled', 'Role Cancelled'];
-    const furthest = (a) => getTags(a).reduce((m, t) => Math.max(m, LADDER.indexOf(t)), -1);
     const reached = (threshold) => applications.filter((a) => furthest(a) >= threshold).length;
 
     const acceptedCompany = applications.find((a) => getTags(a).includes('Offer Accepted'))?.company ?? null;
