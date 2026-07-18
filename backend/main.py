@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List
 from openai import OpenAI
@@ -8,6 +9,7 @@ import sqlite3
 from datetime import datetime, date
 from collections import deque
 import os
+import sys
 import json
 
 app = FastAPI()
@@ -20,7 +22,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "jobs.db")
+# When frozen into a desktop executable (PyInstaller), the code lives in a
+# temporary, read-only extraction dir that is wiped on exit — so the database
+# must live in a stable, per-user, writable location instead. In normal dev we
+# keep the old path so the existing backend/jobs.db keeps working.
+IS_FROZEN = getattr(sys, "frozen", False)
+
+if IS_FROZEN:
+    from platformdirs import user_data_dir
+
+    DATA_DIR = user_data_dir("CareerTracker", appauthor=False)
+    os.makedirs(DATA_DIR, exist_ok=True)
+    DB_PATH = os.path.join(DATA_DIR, "jobs.db")
+else:
+    DB_PATH = os.path.join(os.path.dirname(__file__), "jobs.db")
 
 
 def get_db():
@@ -434,3 +449,23 @@ def delete_application(app_id: int):
     if before is not None:
         push_undo(f"Delete {before.get('company', '')}", [(app_id, before)])
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Serve the built React frontend.
+#
+# In the packaged desktop app the same server delivers both the API and the UI,
+# so the browser loads everything from one origin (no CORS, no separate Vite
+# server). This mount must be registered LAST: it catches "/" and every unknown
+# path, so any route declared after it would be shadowed. The /api/* routes
+# above are matched first because they were registered first.
+#
+# `html=True` makes StaticFiles serve index.html for "/" so the SPA loads.
+# ---------------------------------------------------------------------------
+if IS_FROZEN:
+    _dist_dir = os.path.join(sys._MEIPASS, "frontend_dist")
+else:
+    _dist_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+
+if os.path.isdir(_dist_dir):
+    app.mount("/", StaticFiles(directory=_dist_dir, html=True), name="spa")

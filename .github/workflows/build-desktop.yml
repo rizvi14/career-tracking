@@ -1,0 +1,68 @@
+name: Build desktop app
+
+# Builds the standalone desktop app for Windows and macOS. PyInstaller can't
+# cross-compile, so each OS is built on its own runner. Trigger by pushing a
+# version tag (e.g. `v1.0.0`) or manually from the Actions tab.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: CareerTracker-Windows
+          - os: macos-latest
+            artifact: CareerTracker-macOS
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pyinstaller
+
+      - name: Build executable
+        run: pyinstaller build/career_tracker.spec --noconfirm
+
+      # Zip the .app so the artifact keeps the macOS bundle structure + exec bits.
+      - name: Package macOS app
+        if: runner.os == 'macOS'
+        run: |
+          cd dist
+          ditto -c -k --keepParent CareerTracker.app CareerTracker-macOS.zip
+
+      - name: Upload Windows artifact
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/CareerTracker.exe
+
+      - name: Upload macOS artifact
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/CareerTracker-macOS.zip

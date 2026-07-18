@@ -1,4 +1,8 @@
-const BASE = 'http://localhost:8000';
+// In the packaged desktop app the frontend is served by the FastAPI backend
+// itself, so API calls are same-origin and BASE is empty (relative). In dev,
+// Vite serves the UI on :5173 and we call the backend on :8000 directly — the
+// backend's CORS config already allows this origin.
+const BASE = import.meta.env.DEV ? 'http://localhost:8000' : '';
 
 async function request(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, {
